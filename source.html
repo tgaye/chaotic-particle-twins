@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chaotic Particle Twins</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #121212;
+            font-family: 'Arial', sans-serif;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(30, 30, 40, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            color: #e0e0e0;
+            max-width: 250px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        #controls h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #444;
+            padding-bottom: 8px;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        button, select {
+            background-color: #333;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin: 4px 0;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #444;
+        }
+        #toggleControls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            background-color: rgba(30, 30, 40, 0.9);
+            color: #e0e0e0;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+        }
+        .slider-container input {
+            flex-grow: 1;
+            margin-right: 8px;
+        }
+        .slider-value {
+            width: 40px;
+            text-align: right;
+            font-size: 12px;
+        }
+    </style>
+
+<base target="_self">
+
+
+    <div id="controls">
+        <h3>Chaotic Particle Twins</h3>
+        <div class="control-group">
+            <label>Click to launch particle pairs</label>
+            <button id="launchBtn">Launch Pair</button>
+        </div>
+        <div class="control-group">
+            <label>Time Speed</label>
+            <div class="slider-container">
+                <input type="range" id="timeSpeed" min="0.1" max="3" step="0.1" value="1">
+                <span class="slider-value" id="timeSpeedValue">1.0</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Flow Field Strength</label>
+            <div class="slider-container">
+                <input type="range" id="fieldStrength" min="0.1" max="2" step="0.1" value="0.8">
+                <span class="slider-value" id="fieldStrengthValue">0.8</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Trail Length</label>
+            <div class="slider-container">
+                <input type="range" id="trailLength" min="10" max="200" step="10" value="100">
+                <span class="slider-value" id="trailLengthValue">100</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Color Mode</label>
+            <select id="colorMode">
+                <option value="energy">Energy</option>
+                <option value="age">Age</option>
+                <option value="velocity">Velocity</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <button id="resetBtn">Reset All</button>
+            <button id="clearTrailsBtn">Clear Trails</button>
+        </div>
+    </div>
+    <button id="toggleControls">⚙️</button>
+    <script>
+        const sketch = (p) => {
+            // Constants and configuration
+            const MAX_PARTICLES = 1000;
+            const MAX_TRAIL_POINTS = 200;
+            const PARTICLE_LIFETIME = 10000; // ms
+            const FLOW_FIELD_SCALE = 0.01;
+            const INITIAL_SPEED = 2;
+            
+            // State variables
+            let particles = [];
+            let flowField = [];
+            let fieldResolution = 20;
+            let lastFieldUpdate = 0;
+            let fieldUpdateInterval = 1000;
+            let showControls = true;
+            let canvas;
+            
+            // UI elements
+            let timeSpeedSlider, fieldStrengthSlider, trailLengthSlider;
+            let colorModeSelect, launchBtn, resetBtn, clearTrailsBtn;
+            
+            // Particle class
+            class Particle {
+                constructor(x, y, velocity, colorMode) {
+                    this.position = p.createVector(x, y);
+                    this.velocity = velocity.copy();
+                    this.acceleration = p.createVector(0, 0);
+                    this.maxSpeed = 4;
+                    this.energy = 0;
+                    this.age = 0;
+                    this.lifetime = PARTICLE_LIFETIME;
+                    this.colorMode = colorMode;
+                    this.trail = [];
+                    this.twin = null;
+                    this.birthTime = p.millis();
+                    this.hue = p.random(360);
+                }
+                
+                setTwin(twin) {
+                    this.twin = twin;
+                    this.hue = twin.hue; // Match color with twin
+                }
+                
+                applyForce(force) {
+                    this.acceleration.add(force);
+                }
+                
+                update(timeSpeed, fieldStrength, maxTrailLength) {
+                    // Apply flow field force
+                    const fieldX = p.floor(this.position.x / fieldResolution);
+                    const fieldY = p.floor(this.position.y / fieldResolution);
+                    
+                    if (fieldX >= 0 && fieldX < flowField.length && 
+                        fieldY >= 0 && fieldY < flowField[0].length) {
+                        const force = flowField[fieldX][fieldY].copy();
+                        force.mult(fieldStrength);
+                        this.applyForce(force);
+                    }
+                    
+                    // Update physics
+                    this.velocity.add(this.acceleration);
+                    this.velocity.limit(this.maxSpeed);
+                    this.position.add(p5.Vector.mult(this.velocity, timeSpeed));
+                    this.acceleration.mult(0);
+                    
+                    // Calculate energy (combination of speed and distance from twin)
+                    this.energy = this.velocity.mag();
+                    if (this.twin) {
+                        const distance = p5.Vector.dist(this.position, this.twin.position);
+                        this.energy += distance * 0.01;
+                    }
+                    
+                    // Update age
+                    this.age = p.millis() - this.birthTime;
+                    
+                    // Update trail
+                    this.trail.push(this.position.copy());
+                    if (this.trail.length > maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // Handle boundaries
+                    this.handleBoundaries();
+                }
+                
+                handleBoundaries() {
+                    if (this.position.x < 0) {
+                        this.position.x = p.width;
+                        this.trail = []; // Clear trail on wrap
+                    } else if (this.position.x > p.width) {
+                        this.position.x = 0;
+                        this.trail = [];
+                    }
+                    
+                    if (this.position.y < 0) {
+                        this.position.y = p.height;
+                        this.trail = [];
+                    } else if (this.position.y > p.height) {
+                        this.position.y = 0;
+                        this.trail = [];
+                    }
+                }
+                
+                display(trailOpacity) {
+                    // Draw trail
+                    if (this.trail.length > 1) {
+                        p.noFill();
+                        p.beginShape();
+                        
+                        for (let i = 0; i < this.trail.length; i++) {
+                            const alpha = p.map(i, 0, this.trail.length, 20, trailOpacity);
+                            const pos = this.trail[i];
+                            
+                            // Determine color based on mode
+                            let c;
+                            if (this.colorMode === 'energy') {
+                                const energyNorm = p.constrain(this.energy / 6, 0, 1);
+                                c = p.color(this.hue, 80, p.map(energyNorm, 0, 1, 30, 100));
+                            } else if (this.colorMode === 'age') {
+                                const ageNorm = p.constrain(this.age / this.lifetime, 0, 1);
+                                c = p.color(this.hue, 80, p.map(ageNorm, 0, 1, 30, 100));
+                            } else { // velocity
+                                const velNorm = p.constrain(this.velocity.mag() / this.maxSpeed, 0, 1);
+                                c = p.color(this.hue, 80, p.map(velNorm, 0, 1, 30, 100));
+                            }
+                            
+                            p.stroke(p.red(c), p.green(c), p.blue(c), alpha);
+                            p.vertex(pos.x, pos.y);
+                        }
+                        
+                        p.endShape();
+                    }
+                    
+                    // Draw particle
+                    let particleColor;
+                    if (this.colorMode === 'energy') {
+                        const energyNorm = p.constrain(this.energy / 6, 0, 1);
+                        particleColor = p.color(this.hue, 80, p.map(energyNorm, 0, 1, 50, 100));
+                    } else if (this.colorMode === 'age') {
+                        const ageNorm = p.constrain(this.age / this.lifetime, 0, 1);
+                        particleColor = p.color(this.hue, 80, p.map(ageNorm, 0, 1, 50, 100));
+                    } else { // velocity
+                        const velNorm = p.constrain(this.velocity.mag() / this.maxSpeed, 0, 1);
+                        particleColor = p.color(this.hue, 80, p.map(velNorm, 0, 1, 50, 100));
+                    }
+                    
+                    p.fill(particleColor);
+                    p.noStroke();
+                    p.circle(this.position.x, this.position.y, 4);
+                }
+                
+                isDead() {
+                    return this.age > this.lifetime;
+                }
+            }
+            
+            p.setup = () => {
+                canvas = p.createCanvas(p.windowWidth, p.windowHeight);
+                p.colorMode(p.HSB, 360, 100, 100, 1);
+                
+                // Initialize flow field
+                updateFlowField();
+                
+                // Setup UI elements
+                setupUI();
+                
+                // Load control panel state from localStorage
+                const savedState = localStorage.getItem('controlPanelVisible');
+                if (savedState !== null) {
+                    showControls = savedState === 'true';
+                    p.select('#controls').style('display', showControls ? 'block' : 'none');
+                }
+            };
+            
+            p.draw = () => {
+                p.background(20, 20, 25);
+                
+                // Periodically update flow field
+                if (p.millis() - lastFieldUpdate > fieldUpdateInterval) {
+                    updateFlowField();
+                    lastFieldUpdate = p.millis();
+                }
+                
+                // Get current settings from UI
+                const timeSpeed = parseFloat(p.select('#timeSpeed').value());
+                const fieldStrength = parseFloat(p.select('#fieldStrength').value());
+                const maxTrailLength = parseInt(p.select('#trailLength').value());
+                const colorMode = p.select('#colorMode').value();
+                const trailOpacity = p.map(maxTrailLength, 10, 200, 50, 150);
+                
+                // Update and display particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const particle = particles[i];
+                    particle.colorMode = colorMode;
+                    particle.update(timeSpeed, fieldStrength, maxTrailLength);
+                    particle.display(trailOpacity);
+                    
+                    // Remove dead particles
+                    if (particle.isDead()) {
+                        particles.splice(i, 1);
+                    }
+                }
+                
+                // Display particle count
+                p.fill(200, 200, 200, 150);
+                p.noStroke();
+                p.textSize(12);
+                p.text(`Particles: ${particles.length}/${MAX_PARTICLES}`, 10, p.height - 10);
+            };
+            
+            p.mousePressed = () => {
+                if (p.mouseX > 0 && p.mouseX < p.width && 
+                    p.mouseY > 0 && p.mouseY < p.height) {
+                    launchParticlePair(p.mouseX, p.mouseY);
+                }
+            };
+            
+            p.touchStarted = () => {
+                if (p.touches.length > 0) {
+                    launchParticlePair(p.touches[0].x, p.touches[0].y);
+                    return false; // Prevent default
+                }
+            };
+            
+            p.windowResized = () => {
+                p.resizeCanvas(p.windowWidth, p.windowHeight);
+                updateFlowField();
+            };
+            
+            function updateFlowField() {
+                const cols = p.ceil(p.width / fieldResolution) + 1;
+                const rows = p.ceil(p.height / fieldResolution) + 1;
+                
+                flowField = new Array(cols);
+                for (let x = 0; x < cols; x++) {
+                    flowField[x] = new Array(rows);
+                    for (let y = 0; y < rows; y++) {
+                        const angle = p.noise(x * FLOW_FIELD_SCALE, y * FLOW_FIELD_SCALE, p.millis() * 0.0001) * p.TWO_PI * 2;
+                        flowField[x][y] = p5.Vector.fromAngle(angle);
+                    }
+                }
+            }
+            
+            function launchParticlePair(x, y) {
+                if (particles.length >= MAX_PARTICLES - 2) return;
+                
+                // Create slight initial differences
+                const baseAngle = p.random(p.TWO_PI);
+                const angleVariation = p.random(-0.1, 0.1);
+                
+                // Create first particle
+                const vel1 = p5.Vector.fromAngle(baseAngle).mult(INITIAL_SPEED);
+                const particle1 = new Particle(
+                    x + p.random(-5, 5),
+                    y + p.random(-5, 5),
+                    vel1,
+                    p.select('#colorMode').value()
+                );
+                
+                // Create second particle with slight variation
+                const vel2 = p5.Vector.fromAngle(baseAngle + angleVariation).mult(INITIAL_SPEED * p.random(0.9, 1.1));
+                const particle2 = new Particle(
+                    x + p.random(-5, 5),
+                    y + p.random(-5, 5),
+                    vel2,
+                    p.select('#colorMode').value()
+                );
+                
+                // Link them as twins
+                particle1.setTwin(particle2);
+                particle2.setTwin(particle1);
+                
+                // Add to system
+                particles.push(particle1);
+                particles.push(particle2);
+            }
+            
+            function setupUI() {
+                // Get references to UI elements
+                timeSpeedSlider = p.select('#timeSpeed');
+                fieldStrengthSlider = p.select('#fieldStrength');
+                trailLengthSlider = p.select('#trailLength');
+                colorModeSelect = p.select('#colorMode');
+                launchBtn = p.select('#launchBtn');
+                resetBtn = p.select('#resetBtn');
+                clearTrailsBtn = p.select('#clearTrailsBtn');
+                
+                // Set up event listeners
+                timeSpeedSlider.input(() => {
+                    p.select('#timeSpeedValue').html(timeSpeedSlider.value());
+                });
+                
+                fieldStrengthSlider.input(() => {
+                    p.select('#fieldStrengthValue').html(fieldStrengthSlider.value());
+                });
+                
+                trailLengthSlider.input(() => {
+                    p.select('#trailLengthValue').html(trailLengthSlider.value());
+                });
+                
+                launchBtn.mousePressed(() => {
+                    launchParticlePair(p.random(p.width), p.random(p.height));
+                });
+                
+                resetBtn.mousePressed(() => {
+                    particles = [];
+                });
+                
+                clearTrailsBtn.mousePressed(() => {
+                    particles.forEach(p => p.trail = []);
+                });
+                
+                // Toggle controls button
+                p.select('#toggleControls').mousePressed(() => {
+                    showControls = !showControls;
+                    p.select('#controls').style('display', showControls ? 'block' : 'none');
+                    localStorage.setItem('controlPanelVisible', showControls);
+                });
+            }
+        };
+        
+        new p5(sketch);
+    </script>
+
+              
+          
+                
+          
+              
